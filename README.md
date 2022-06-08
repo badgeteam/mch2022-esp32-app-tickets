@@ -1,6 +1,6 @@
-# MCH2022 template app
+# MCH2022 tickets
 
-This repository contains a template app for the MCH2022 badge.
+This app shows an overview of tickets sold for MCH2022.
 
 ## License
 
