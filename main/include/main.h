@@ -7,6 +7,8 @@ typedef struct {
     bool is_available;
     // The total number of this ticket.
     int  total;
+    // the number for sale for this ticket.
+    int  unsold;
     // The sold number of this ticket.
     int  sold;
 } ticket_sales_t;

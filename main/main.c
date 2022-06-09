@@ -51,6 +51,7 @@ void disp_flush() {
 esp_mqtt_client_handle_t client;
 esp_event_loop_handle_t  client_events;
 bool connected = false;
+volatile bool ded = false;
 
 void app_main() {
     // Init HW.
@@ -94,14 +95,13 @@ void app_main() {
         if (connected) {
             // Main ticket pie chart.
             pax_background(&buf, 0);
-            int unsold = regularTickets.total - regularTickets.sold;
             char buf0[64];
             char buf1[64];
             char buf2[64];
             const piechart_slice_t slices[] = {
                 { .name = buf0, .part = earlyBirdTickets.total, .color = 0xffff7f00, },
                 { .name = buf1, .part = regularTickets.sold,    .color = 0xff00ff3f, },
-                { .name = buf2, .part = unsold,                 .color = 0xff007fff, },
+                { .name = buf2, .part = regularTickets.unsold,  .color = 0xff007fff, },
             };
             
             // Make some names.
@@ -140,9 +140,10 @@ void app_main() {
         
         disp_flush();
         rp2040_input_message_t event;
-        if (xQueueReceive(buttonQueue, &event, pdMS_TO_TICKS(connected ? 5000 : 1000))) {
+        if (xQueueReceive(buttonQueue, &event, pdMS_TO_TICKS(connected ? 5000 : 500))) {
             if (event.input == RP2040_INPUT_BUTTON_HOME && event.state) {
                 // Go to launcher.
+                ded = true;
                 REG_WRITE(RTC_CNTL_STORE0_REG, 0);
                 esp_restart();
             }
@@ -159,11 +160,13 @@ static void mqtt_message_handler(char *topic, char *data) {
     
     // Get data objects.
     cJSON *avl_obj      = cJSON_GetObjectItem(object, "available");
+    cJSON *avl_num_obj  = cJSON_GetObjectItem(object, "available_number");
     cJSON *sold_num_obj = cJSON_GetObjectItem(object, "sold");
     cJSON *quota_obj    = cJSON_GetObjectItem(object, "quota");
     
     // Enforce data types.
     if (!cJSON_IsBool  (avl_obj))      goto end;
+    if (!cJSON_IsNumber(avl_num_obj))  goto end;
     if (!cJSON_IsNumber(sold_num_obj)) goto end;
     if (!cJSON_IsNumber(quota_obj))    goto end;
     
@@ -171,7 +174,7 @@ static void mqtt_message_handler(char *topic, char *data) {
     bool avl      = cJSON_IsTrue(avl_obj);
     int  sold_num = cJSON_GetNumberValue(sold_num_obj);
     int  quota    = cJSON_GetNumberValue(quota_obj);
-    int  avl_num  = quota - sold_num;
+    int  avl_num  = cJSON_GetNumberValue(avl_num_obj);
     
     // Log the ticket.
     if (avl) {
@@ -185,6 +188,7 @@ static void mqtt_message_handler(char *topic, char *data) {
         .is_available = avl,
         .sold         = sold_num,
         .total        = quota,
+        .unsold       = avl_num,
     };
     if (!strcmp(topic, "mch2022/ticketshop/RegularTickets"))    regularTickets   = sales;
     if (!strcmp(topic, "mch2022/ticketshop/Early-BirdTickets")) earlyBirdTickets = sales;
@@ -235,7 +239,7 @@ void mqtt_event_handler(void* event_handler_arg, esp_event_base_t event_base, in
         // Clean up.
         if (!data_term)  free(data_buf);
         if (!topic_term) free(topic_buf);
-    } else if (event_id == MQTT_EVENT_DISCONNECTED) {
+    } else if (event_id == MQTT_EVENT_DISCONNECTED && !ded) {
         connected = false;
         // Make sure to keep Wi-Fi up.
         wifi_connect_to_stored();
