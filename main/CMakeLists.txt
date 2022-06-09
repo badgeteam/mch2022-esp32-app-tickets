@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "wifi_connect.c"
         "wifi_connection.c"
+        "piechart.c"
     INCLUDE_DIRS
         "." "include"
 )
