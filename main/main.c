@@ -86,21 +86,40 @@ void app_main() {
     // Start MQTT.
     ESP_ERROR_CHECK(esp_mqtt_client_start(client));
     
-    // Tset.
-    const pax_font_t *font = pax_get_font("saira regular");
-    pax_background(&buf, 0);
-    pax_draw_text(&buf, -1, font, 24, 10, 10, "Wow!");
-    
-    // Tets PIE.
-    const piechart_slice_t slices[] = {
-        { .name = "Orange", .part = 1, .color = 0x7fff7f00, },
-        { .name = "Green",  .part = 2, .color = 0x7f00ff3f, },
-        { .name = "Blue",   .part = 3, .color = 0x7f007fff, },
-    };
-    const size_t n_slices = sizeof(slices) / sizeof(piechart_slice_t);
-    piechart(&buf, buf.width/2, buf.height/2, 100, slices, n_slices);
-    
-    disp_flush();
+    while (1) {
+        // Main ticket pie chart.
+        pax_background(&buf, 0);
+        int unsold = regularTickets.total - regularTickets.sold;
+        char buf0[64];
+        char buf1[64];
+        char buf2[64];
+        const piechart_slice_t slices[] = {
+            { .name = buf0, .part = earlyBirdTickets.total, .color = 0xffff7f00, },
+            { .name = buf1, .part = regularTickets.sold,    .color = 0xff00ff3f, },
+            { .name = buf2, .part = unsold,                 .color = 0xff007fff, },
+        };
+        
+        // Make some names.
+        snprintf(buf0, 64, "%d",   (int)slices[0].part);
+        snprintf(buf1, 64, "%d",      (int)slices[1].part);
+        snprintf(buf2, 64, "%d", (int)slices[2].part);
+        
+        // Draw the pie chart.
+        const size_t n_slices = sizeof(slices) / sizeof(piechart_slice_t);
+        piechart(&buf, buf.width-buf.height/2, buf.height/2, 100, slices, n_slices);
+        
+        // Draw the legend.
+        const pax_font_t *font = pax_get_font("saira regular");
+        pax_draw_circle(&buf, 0xffff7f00, 5, buf.height/2-20, 4);
+        pax_draw_circle(&buf, 0xff00ff3f, 5, buf.height/2,    4);
+        pax_draw_circle(&buf, 0xff007fff, 5, buf.height/2+20, 4);
+        pax_draw_text(&buf, -1, font, 18, 10, buf.height/2-25, "Early bird");
+        pax_draw_text(&buf, -1, font, 18, 10, buf.height/2- 5, "Regular");
+        pax_draw_text(&buf, -1, font, 18, 10, buf.height/2+15, "Available");
+        
+        disp_flush();
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
 }
 
 static void mqtt_message_handler(char *topic, char *data) {
