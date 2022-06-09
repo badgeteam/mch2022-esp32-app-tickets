@@ -22,6 +22,9 @@
 #include "mqtt_client.h"
 #include "cJSON.h"
 
+#include "soc/rtc.h"
+#include "soc/rtc_cntl_reg.h"
+
 /* Topics:
 mch2022/ticketshop/RegularTickets
 mch2022/ticketshop/CamperTicket
@@ -47,6 +50,7 @@ void disp_flush() {
 
 esp_mqtt_client_handle_t client;
 esp_event_loop_handle_t  client_events;
+bool connected = false;
 
 void app_main() {
     // Init HW.
@@ -87,38 +91,62 @@ void app_main() {
     ESP_ERROR_CHECK(esp_mqtt_client_start(client));
     
     while (1) {
-        // Main ticket pie chart.
-        pax_background(&buf, 0);
-        int unsold = regularTickets.total - regularTickets.sold;
-        char buf0[64];
-        char buf1[64];
-        char buf2[64];
-        const piechart_slice_t slices[] = {
-            { .name = buf0, .part = earlyBirdTickets.total, .color = 0xffff7f00, },
-            { .name = buf1, .part = regularTickets.sold,    .color = 0xff00ff3f, },
-            { .name = buf2, .part = unsold,                 .color = 0xff007fff, },
-        };
-        
-        // Make some names.
-        snprintf(buf0, 64, "%d",   (int)slices[0].part);
-        snprintf(buf1, 64, "%d",      (int)slices[1].part);
-        snprintf(buf2, 64, "%d", (int)slices[2].part);
-        
-        // Draw the pie chart.
-        const size_t n_slices = sizeof(slices) / sizeof(piechart_slice_t);
-        piechart(&buf, buf.width-buf.height/2, buf.height/2, 100, slices, n_slices);
-        
-        // Draw the legend.
-        const pax_font_t *font = pax_get_font("saira regular");
-        pax_draw_circle(&buf, 0xffff7f00, 5, buf.height/2-20, 4);
-        pax_draw_circle(&buf, 0xff00ff3f, 5, buf.height/2,    4);
-        pax_draw_circle(&buf, 0xff007fff, 5, buf.height/2+20, 4);
-        pax_draw_text(&buf, -1, font, 18, 10, buf.height/2-25, "Early bird");
-        pax_draw_text(&buf, -1, font, 18, 10, buf.height/2- 5, "Regular");
-        pax_draw_text(&buf, -1, font, 18, 10, buf.height/2+15, "Available");
+        if (connected) {
+            // Main ticket pie chart.
+            pax_background(&buf, 0);
+            int unsold = regularTickets.total - regularTickets.sold;
+            char buf0[64];
+            char buf1[64];
+            char buf2[64];
+            const piechart_slice_t slices[] = {
+                { .name = buf0, .part = earlyBirdTickets.total, .color = 0xffff7f00, },
+                { .name = buf1, .part = regularTickets.sold,    .color = 0xff00ff3f, },
+                { .name = buf2, .part = unsold,                 .color = 0xff007fff, },
+            };
+            
+            // Make some names.
+            snprintf(buf0, 64, "%d", (int)slices[0].part);
+            snprintf(buf1, 64, "%d", (int)slices[1].part);
+            snprintf(buf2, 64, "%d", (int)slices[2].part);
+            
+            // Draw the pie chart.
+            const size_t n_slices = sizeof(slices) / sizeof(piechart_slice_t);
+            piechart(&buf, buf.width-buf.height/2, buf.height/2, 100, slices, n_slices);
+            
+            // Draw the legend.
+            const pax_font_t *font = pax_get_font("saira regular");
+            pax_draw_circle(&buf, 0xffff7f00, 5, buf.height/2-20, 4);
+            pax_draw_circle(&buf, 0xff00ff3f, 5, buf.height/2,    4);
+            pax_draw_circle(&buf, 0xff007fff, 5, buf.height/2+20, 4);
+            pax_draw_text(&buf, -1, font, 18, 10, buf.height/2-25, "Early bird");
+            pax_draw_text(&buf, -1, font, 18, 10, buf.height/2- 5, "Regular");
+            pax_draw_text(&buf, -1, font, 18, 10, buf.height/2+15, "Available");
+        } else {
+            // Show a simple not connected text.
+            int hue = esp_random() & 255;
+            pax_col_t col = pax_col_hsv(hue, 255 /*saturation*/, 255 /*brighness*/);
+            
+            pax_background(&buf, col);
+            char             *text = "Connecting...";
+            const pax_font_t *font = pax_get_font("saira condensed");
+            pax_vec1_t        dims = pax_text_size(font, font->default_size, text);
+            pax_draw_text(
+                &buf, 0xff000000, font, font->default_size,
+                (buf.width  - dims.x) / 2.0,
+                (buf.height - dims.y) / 2.0,
+                text
+            );
+        }
         
         disp_flush();
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        rp2040_input_message_t event;
+        if (xQueueReceive(buttonQueue, &event, pdMS_TO_TICKS(connected ? 5000 : 1000))) {
+            if (event.input == RP2040_INPUT_BUTTON_HOME && event.state) {
+                // Go to launcher.
+                REG_WRITE(RTC_CNTL_STORE0_REG, 0);
+                esp_restart();
+            }
+        }
     }
 }
 
@@ -173,6 +201,7 @@ void mqtt_event_handler(void* event_handler_arg, esp_event_base_t event_base, in
     esp_mqtt_event_t *event = event_data;
     if (event_id == MQTT_EVENT_CONNECTED) {
         // Connected, now subscribe.
+        connected = true;
         ESP_LOGI(TAG, "MQTT Connected.");
         esp_mqtt_client_subscribe(client, "mch2022/ticketshop/RegularTickets", 0);
         esp_mqtt_client_subscribe(client, "mch2022/ticketshop/Early-BirdTickets", 0);
@@ -206,5 +235,9 @@ void mqtt_event_handler(void* event_handler_arg, esp_event_base_t event_base, in
         // Clean up.
         if (!data_term)  free(data_buf);
         if (!topic_term) free(topic_buf);
+    } else if (event_id == MQTT_EVENT_DISCONNECTED) {
+        connected = false;
+        // Make sure to keep Wi-Fi up.
+        wifi_connect_to_stored();
     }
 }
