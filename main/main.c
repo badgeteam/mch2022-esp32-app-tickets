@@ -12,6 +12,10 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 
+#include "wifi_connect.h"
+#include "wifi_connection.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "esp_system.h"
 #include "esp_event.h"
 #include "mqtt_client.h"
@@ -46,6 +50,11 @@ void app_main() {
         .task_stack_size = 2048,
     };
     esp_event_loop_create(&event_args, &client_events);
+    
+    // Init NVS and ask for WiFi.
+    ESP_ERROR_CHECK(nvs_flash_init());
+    wifi_init();
+    wifi_connect_to_stored();
     
     // Subscrer to MQTT.
     const esp_mqtt_client_config_t init_cfg = {
